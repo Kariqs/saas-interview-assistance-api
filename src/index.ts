@@ -4,6 +4,7 @@ import userRoutes from "./routes/user";
 import connectDB from "./config/db";
 import morgan from "morgan";
 import cors from "cors";
+import { initializeWebSocket } from "./config/websoket";
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
@@ -30,10 +31,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes);
 
 connectDB().then(() => {
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
   });
+  initializeWebSocket(server);
 });
-function callback(arg0: null, arg1: boolean) {
-  throw new Error("Function not implemented.");
-}
