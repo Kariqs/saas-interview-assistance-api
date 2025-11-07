@@ -5,6 +5,8 @@ import connectDB from "./config/db";
 import morgan from "morgan";
 import cors from "cors";
 import { initializeWebSocket } from "./config/websoket";
+import { setupApiRoutes } from "./config/websoket";
+import { set } from "mongoose";
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
@@ -29,6 +31,7 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes);
+setupApiRoutes(app);
 
 connectDB().then(() => {
   const server = app.listen(port, () => {
