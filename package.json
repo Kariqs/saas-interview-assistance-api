@@ -12,6 +12,7 @@
   "author": "Benard Kariuki",
   "license": "ISC",
   "dependencies": {
+    "@deepgram/sdk": "^4.11.2",
     "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
