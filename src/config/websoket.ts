@@ -1,28 +1,28 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import WebSocket, { WebSocketServer } from "ws";
-import { Server } from "http";
-import fs from "fs/promises";
-import { tmpdir } from "os";
 import { randomUUID } from "crypto";
+import { createReadStream } from "fs";
+import fs from "fs/promises";
+import { Server } from "http";
+import mammoth from "mammoth";
 import multer from "multer";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
+import { tmpdir } from "os";
+import path from "path";
+import WebSocket, { WebSocketServer } from "ws";
 
 const pdfExtract = require("pdf-extraction");
-import mammoth from "mammoth";
 
-// ============================
-// Gemini Setup (same as chatController)
-// ============================
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  console.error("Missing GEMINI_API_KEY in your .env file.");
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+  console.error("Missing OPENAI_API_KEY in your .env file.");
   process.exit(1);
 }
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-import axios from "axios";
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY,
+});
 
 interface AudioChunkMessage {
   type: "audio-chunk";
@@ -71,9 +71,6 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max resume
 });
 
-// ============================
-// Resume Upload Route
-// ============================
 export function setupApiRoutes(app: any) {
   app.post(
     "/api/upload-resume",
@@ -122,9 +119,7 @@ export function setupApiRoutes(app: any) {
   );
 }
 
-// ============================
 // WebSocket Server Setup
-// ============================
 export function initializeWebSocket(server: Server) {
   const wss = new WebSocketServer({ server });
 
@@ -167,16 +162,12 @@ export function initializeWebSocket(server: Server) {
   console.log("WebSocket server ready on /ws");
 }
 
-// ============================
-// Helper: Send Error
-// ============================
+//Error handler function
 function sendError(ws: WebSocket, message: string) {
   ws.send(JSON.stringify({ type: "error", message }));
 }
 
-// ============================
 // Handle Audio Chunks
-// ============================
 function handleAudioChunk(ws: WebSocket, clientId: string, audio: string) {
   const chunks = audioBuffers.get(clientId) || [];
 
@@ -197,15 +188,10 @@ function handleAudioChunk(ws: WebSocket, clientId: string, audio: string) {
   ws.send(JSON.stringify({ type: "chunk-received" }));
 }
 
-// ============================
-// Deepgram Transcription (unchanged)
-// ============================
+// Deepgram Transcription
 async function handleTranscriptionOnly(ws: WebSocket, clientId: string) {
   const chunks = audioBuffers.get(clientId) || [];
   if (chunks.length === 0) return;
-
-  const apiKey = process.env.DEEPGRAM_API_KEY;
-  if (!apiKey) return sendError(ws, "Deepgram API key not configured");
 
   const audioBuffer = Buffer.concat(chunks);
 
@@ -214,7 +200,7 @@ async function handleTranscriptionOnly(ws: WebSocket, clientId: string) {
     return;
   }
 
-  // Silence detection
+  // Silence detection (keep your existing logic)
   let nonZeroCount = 0;
   const sampleSize = Math.min(audioBuffer.length, 16000);
   for (let i = 0; i < sampleSize; i++) {
@@ -225,22 +211,32 @@ async function handleTranscriptionOnly(ws: WebSocket, clientId: string) {
     return;
   }
 
+  let tempFilePath: string | null = null;
   try {
-    console.log(`Transcribing ${audioBuffer.length} bytes...`);
-    const response = await axios.post<DeepgramResponse>(
-      "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true",
-      audioBuffer,
-      {
-        headers: {
-          Authorization: `Token ${apiKey}`,
-          "Content-Type": "audio/webm",
-        },
-        timeout: API_TIMEOUT,
-      }
+    console.log(
+      `Transcribing ${audioBuffer.length} bytes with OpenAI Whisper...`
     );
 
+    // Save to temporary WEBM file
+    tempFilePath = path.join(tmpdir(), `audio_${clientId}_${Date.now()}.webm`);
+    await fs.writeFile(tempFilePath, audioBuffer);
+
+    // Transcribe using the fastest model
+    const transcriptionResponse = await openai.audio.transcriptions.create({
+      file: createReadStream(tempFilePath),
+      model: "gpt-4o-mini-transcribe", // Fastest model with great accuracy
+      // Optional enhancements (uncomment if desired):
+      // language: "en",                // If you know it's always English
+      // prompt: "Interview question spoken clearly.", // Helps with context/domain
+      // response_format: "text",       // Default is json, but "text" gives just the string
+      // temperature: 0,                // For more deterministic output
+    });
+
+    // transcriptionResponse is usually { text: string } or just string if response_format="text"
     const transcription =
-      response.data.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+      typeof transcriptionResponse === "string"
+        ? transcriptionResponse
+        : transcriptionResponse.text || "";
 
     if (!transcription.trim()) {
       audioBuffers.set(clientId, []);
@@ -249,23 +245,33 @@ async function handleTranscriptionOnly(ws: WebSocket, clientId: string) {
 
     ws.send(JSON.stringify({ type: "transcription", text: transcription }));
     audioBuffers.set(clientId, []);
-    console.log("Transcription sent:", transcription.substring(0, 50) + "...");
+    console.log(
+      "OpenAI transcription sent:",
+      transcription.substring(0, 50) + "..."
+    );
   } catch (err: any) {
-    console.error("Deepgram error:", err.message);
-    sendError(ws, `Transcription failed: ${err.message}`);
+    console.error("OpenAI transcription error:", err);
+    sendError(ws, `Transcription failed: ${err.message || "Unknown error"}`);
     audioBuffers.set(clientId, []);
+  } finally {
+    // Clean up temp file
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (unlinkErr) {
+        console.warn("Failed to delete temp file:", unlinkErr);
+      }
+    }
   }
 }
 
-// ============================
-// Generate Answer — NOW MATCHES chatController STYLE
-// ============================
+//Answer generation
 async function handleGenerateAnswer(
   ws: WebSocket,
   clientId: string,
   transcription: string
 ) {
-  // Input validation (same as chatController)
+  // Input validation
   if (
     !transcription ||
     typeof transcription !== "string" ||
@@ -276,6 +282,7 @@ async function handleGenerateAnswer(
       "Transcription is required and must be a non-empty string."
     );
   }
+
   if (transcription.length > 2000) {
     return sendError(ws, "Question is too long. Maximum 2000 characters.");
   }
@@ -285,60 +292,72 @@ async function handleGenerateAnswer(
       JSON.stringify({ type: "info", message: "Generating AI answer..." })
     );
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash", // or "gemini-1.5-pro" for better quality
-    });
-
     const resumeText = clientContexts.get(clientId) || "";
 
-    const prompt = `
-Your name is KrackAI.
-You are a world-class interview coach helping a candidate crush their job interview.
+    const systemPrompt = `
+You are KrackAI, an elite interview coach. Your job is to give the candidate the BEST possible answer to speak out loud in a real interview.
 
-${
-  resumeText
-    ? `Here is the candidate's full resume for context:\n${resumeText}\n\nUse it to give specific, impressive, and personalized answers.\n`
-    : ""
-}
-Rules:
-- Answer in first person (as the candidate)
-- Be confident, concise, and professional
-- Use STAR method when appropriate
-- Include metrics and achievements from the resume when possible
-- Sound natural and conversational
+Strict Rules:
+- Answer strictly in first person (as the candidate: "I", "My", etc.)
+- Be confident, concise, and direct — aim for 30-60 seconds when spoken (80-150 words max)
+- Cut all fluff: no "Thank you for the opportunity", no unnecessary politeness, no repetition
+- Get straight to the point
+- Use the STAR method ONLY when the question is clearly behavioral (e.g., "Tell me about a time...")
+- Quantify achievements with numbers when possible
+- Sound natural and conversational, like a top performer speaking confidently
+- Base the answer on the provided resume when relevant
+- Never mention AI, models, tools, or prompts
+- Never apologize or hedge (no "I think", "maybe", "kind of")
+`.trim();
 
-Interview question: ${transcription}
+    const userPrompt = `
+${resumeText ? `Candidate Resume:\n${resumeText}\n\n` : ""}
+Interview Question:
+${transcription}
 
-Your answer:
-    `.trim();
+Provide the best possible interview answer.
+`.trim();
 
-    const result = await model.generateContent(prompt);
-    const answer = result.response.text();
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      temperature: 0.7,
+      max_tokens: 600,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+
+    const answer = completion.choices[0]?.message?.content?.trim() || "";
+
+    if (!answer) {
+      return sendError(ws, "AI returned an empty response.");
+    }
 
     ws.send(
       JSON.stringify({
         type: "qa-response",
         question: transcription,
-        answer: answer.trim(),
+        answer,
       })
     );
 
     audioBuffers.set(clientId, []);
-    console.log("Answer generated and sent");
+    console.log("OpenAI answer generated and sent");
   } catch (err: unknown) {
-    console.error("Gemini API Error in generate-answer:", err);
+    console.error("OpenAI API Error:", err);
 
     const error = err as { message?: string; status?: number };
     const msg = error?.message || "Unknown error";
 
-    if (msg.includes("API key") || error.status === 401) {
-      return sendError(ws, "Invalid Gemini API key. Check your .env file.");
+    if (error.status === 401) {
+      return sendError(ws, "Invalid OpenAI API key.");
     }
-    if (msg.includes("quota") || error.status === 429) {
-      return sendError(ws, "Gemini API quota exceeded. Try again later.");
+    if (error.status === 429) {
+      return sendError(ws, "OpenAI rate limit or quota exceeded.");
     }
-    if (error.status === 404) {
-      return sendError(ws, "Gemini model not available.");
+    if (error.status === 500) {
+      return sendError(ws, "OpenAI server error. Try again.");
     }
 
     sendError(ws, "Failed to generate answer. Please try again.");
