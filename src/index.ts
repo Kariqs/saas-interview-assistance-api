@@ -1,12 +1,11 @@
+import cors from "cors";
 import "dotenv/config";
 import express, { Application } from "express";
-import userRoutes from "./routes/user";
-import connectDB from "./config/db";
 import morgan from "morgan";
-import cors from "cors";
-import { initializeWebSocket } from "./config/websoket";
-import { setupApiRoutes } from "./config/websoket";
-import { set } from "mongoose";
+import connectDB from "./config/db";
+import { initializeRealtimeWebSocket } from "./config/websoket";
+import interviewRoutes from "./routes/interview";
+import userRoutes from "./routes/user";
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
@@ -31,11 +30,12 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes);
-setupApiRoutes(app);
+app.use(interviewRoutes);
+// setupApiRoutes(app);
 
 connectDB().then(() => {
   const server = app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
   });
-  initializeWebSocket(server);
+  initializeRealtimeWebSocket(server);
 });
