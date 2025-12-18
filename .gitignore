@@ -1,1 +1,17 @@
+# Node modules
+node_modules/
+
+# Logs
+*.log
+
+# Environment files containing secrets
 .env
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build/dist folders
+dist/
+build/
