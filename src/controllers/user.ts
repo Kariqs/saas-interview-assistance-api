@@ -66,7 +66,10 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const token = generateToken(userExists.username, userExists.email);
+    const token = generateToken({
+      username: userExists.username,
+      email: userExists.email,
+    });
     res.status(200).json({
       message: "Login was successful.",
       user: {

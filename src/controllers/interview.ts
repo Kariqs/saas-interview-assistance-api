@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import fs from "fs/promises";
 import mammoth from "mammoth";
 import { upload } from "../middlewares/upload";
+import Interview from "../models/interview";
+import { AuthenticatedRequest } from "../middlewares/auth";
+import mongoose from "mongoose";
+import { count } from "console";
 const pdfExtract = require("pdf-extraction");
 
 export const uploadResume = [
@@ -50,7 +54,9 @@ export const uploadResume = [
 
 export const generateAnswer = async (req: Request, res: Response) => {
   try {
-    const { question, resumeText } = req.body;
+    const { question, resumeText, jobDescription } = req.body;
+
+    console.log(jobDescription)
 
     if (!question?.trim()) {
       return res.status(400).json({ error: "No question provided" });
@@ -73,14 +79,19 @@ export const generateAnswer = async (req: Request, res: Response) => {
 You are KrackAI, an elite interview coach.
 
 Respond in first person as the candidate.
-Be confident, concise (80-150 words), direct.
+Be confident, concise (80-100 words), direct.
 No fluff, no hedging.
 Use STAR only for behavioral questions.
 Quantify achievements when possible.
 Sound natural.
 
+**Strictly use only the information from the resume and job description provided.**
+
 Use this resume for context:
 ${resumeText || "No resume provided."}
+
+Also use this job description for  another context:
+${jobDescription || "No job description provided provided."}
 
 Never mention being an AI.
             `.trim(),
@@ -104,5 +115,108 @@ Never mention being an AI.
     res
       .status(500)
       .json({ error: error.message || "Failed to generate answer" });
+  }
+};
+
+export const createInterview = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userEmail = req.user?.email;
+    if (!userEmail) {
+      return res.status(401).json({ message: "Unauthorized." });
+    }
+
+    const { date, timeTaken } = req.body;
+    if (!date || timeTaken === undefined || timeTaken === null) {
+      return res.status(400).json({ message: "Missing required fields." });
+    }
+    const newInterview = new Interview({ userEmail, date, timeTaken });
+    const savedInterview = await newInterview.save();
+    return res.status(201).json({
+      message: "Interview created sucessfully.",
+      interviewId: savedInterview._id,
+    });
+  } catch (error) {
+    console.error("Interview creation error", error);
+    return res.status(500).json({ message: "Error creating interview." });
+  }
+};
+
+export const fetchInterviewsByEmail = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const userEmail = req.user?.email;
+    if (!userEmail) {
+      return res.status(400).json({ message: "Unauthorized." });
+    }
+    const interviews = await Interview.find({ userEmail })
+      .sort({
+        createdAt: -1,
+      })
+      .limit(5)
+      .select("-userEmail");
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+    const userInterviewsCount = await Interview.countDocuments({
+      userEmail,
+      date: { $gte: startOfMonth, $lte: endOfMonth },
+    });
+
+    return res.status(200).json({
+      message: "Interviews fetched successfully.",
+      interviews: interviews,
+      count: userInterviewsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching interviews", error);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+export const deleteInterviewById = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const interviewId = req.params.id;
+    const userEmail = req.user?.email;
+
+    if (!userEmail) {
+      return res.status(401).json({ message: "Unauthorized." });
+    }
+
+    if (!interviewId || !mongoose.Types.ObjectId.isValid(interviewId)) {
+      return res.status(400).json({ message: "Invalid interview ID." });
+    }
+
+    const deletedInterview = await Interview.findOneAndDelete({
+      _id: interviewId,
+      userEmail,
+    });
+
+    if (!deletedInterview) {
+      return res
+        .status(404)
+        .json({ message: "Interview not found or not yours." });
+    }
+
+    return res.status(200).json({ message: "Interview deleted successfully." });
+  } catch (error) {
+    console.error("Delete interview error:", error);
+    return res.status(500).json({ message: "Error deleting interview." });
   }
 };
