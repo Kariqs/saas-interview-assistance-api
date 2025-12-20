@@ -1,5 +1,5 @@
 # Run the KrackAI API container in production-like mode
-run-prod: stop-api
+run-prod: 
 	@echo "Starting KrackAI API container (detached mode)..."
 	docker run -d \
 		--name krackai-api \
@@ -9,7 +9,7 @@ run-prod: stop-api
 		-e JWT_SECRET=mnvjyfmvuiekgf54iukvjhvmcu3jvmciuk \
 		-e JWT_EXPIRES_IN=1d \
 		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		krackai-api:v1
+		krackai-api:v2
 
 # Stop and remove the container (safe even if not running)
 stop-api:
