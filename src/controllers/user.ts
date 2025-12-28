@@ -5,6 +5,7 @@ import {
   encryptPassword as hashPassword,
 } from "../utils/hash";
 import { generateToken } from "../utils/jwt";
+import { AuthenticatedRequest } from "../middlewares/auth";
 
 export const createAccount = async (
   req: Request,
@@ -77,9 +78,33 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         email: userExists.email,
       },
       token: token,
+      remainingMinutes: userExists.remainingMinutes,
+      tier: userExists.tier,
+      hasUsedFreeTier: userExists.hasUsedFreeTier,
     });
   } catch (error) {
     console.log(error);
     res.status(400).json({ message: "Error occured while trying to log in." });
   }
 };
+
+export const getUserByEmail = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const email = req.user?.email;
+    if (!email) {
+      return res.status(400).json({ message: "Unauthorized." });
+    }
+    const user = await User.findOne({ email }).select("-password");
+    return res.status(200).json({
+      message: "User fetched successfully.",
+      user: user,
+    });
+  } catch (error) {
+    console.error("Error fetching interviews", error);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+

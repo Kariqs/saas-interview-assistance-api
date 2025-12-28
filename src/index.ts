@@ -6,6 +6,7 @@ import connectDB from "./config/db";
 import { initializeRealtimeWebSocket } from "./config/websoket";
 import interviewRoutes from "./routes/interview";
 import userRoutes from "./routes/user";
+import supportRoutes from "./routes/support";
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
@@ -31,7 +32,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes);
 app.use(interviewRoutes);
-// setupApiRoutes(app);
+app.use(supportRoutes);
 
 connectDB().then(() => {
   const server = app.listen(port, () => {

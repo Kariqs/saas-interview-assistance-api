@@ -1,11 +1,11 @@
 import { Request, Response } from "express";
 import fs from "fs/promises";
 import mammoth from "mammoth";
+import mongoose from "mongoose";
+import { AuthenticatedRequest } from "../middlewares/auth";
 import { upload } from "../middlewares/upload";
 import Interview from "../models/interview";
-import { AuthenticatedRequest } from "../middlewares/auth";
-import mongoose from "mongoose";
-import { count } from "console";
+import User from "../models/user";
 const pdfExtract = require("pdf-extraction");
 
 export const uploadResume = [
@@ -56,7 +56,7 @@ export const generateAnswer = async (req: Request, res: Response) => {
   try {
     const { question, resumeText, jobDescription } = req.body;
 
-    console.log(jobDescription)
+    console.log(jobDescription);
 
     if (!question?.trim()) {
       return res.status(400).json({ error: "No question provided" });
@@ -218,5 +218,82 @@ export const deleteInterviewById = async (
   } catch (error) {
     console.error("Delete interview error:", error);
     return res.status(500).json({ message: "Error deleting interview." });
+  }
+};
+
+export const heartBeat = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ message: "Unauthorized." });
+
+    const user = await User.findOne({ email }).select(
+      "tier remainingMinutes consumedMinutes"
+    );
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    // If less than 1 minute left, block further usage
+    if (user.remainingMinutes < 1) {
+      user.remainingMinutes = 0;
+      await user.save();
+      return res.status(403).json({
+        message: "No remaining time",
+        remainingMinutes: 0,
+        consumedMinutes: user.consumedMinutes,
+      });
+    }
+
+    // Deduct exactly 1 minute
+    user.remainingMinutes -= 1;
+    user.consumedMinutes += 1;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Heartbeat received",
+      remainingMinutes: user.remainingMinutes,
+      consumedMinutes: user.consumedMinutes,
+    });
+  } catch (error) {
+    console.error("Heartbeat error:", error);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+export const deductPartial = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ message: "Unauthorized." });
+
+    const { partialMinutes } = req.body;
+
+    if (
+      typeof partialMinutes !== "number" ||
+      partialMinutes <= 0 ||
+      partialMinutes >= 1
+    ) {
+      return res.status(400).json({ message: "Invalid partialMinutes value." });
+    }
+
+    const user = await User.findOne({ email }).select(
+      "remainingMinutes consumedMinutes"
+    );
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const deduction = Math.min(partialMinutes, user.remainingMinutes);
+
+    user.remainingMinutes -= deduction;
+    user.consumedMinutes += deduction;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Partial time deducted",
+      remainingMinutes: user.remainingMinutes,
+      consumedMinutes: user.consumedMinutes,
+    });
+  } catch (error) {
+    console.error("Deduct partial error:", error);
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
