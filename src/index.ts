@@ -7,6 +7,9 @@ import { initializeRealtimeWebSocket } from "./config/websoket";
 import interviewRoutes from "./routes/interview";
 import userRoutes from "./routes/user";
 import supportRoutes from "./routes/support";
+import paymentRoutes from "./routes/payment";
+import webhookRoutes from "./routes/stripe_webhook";
+import { stripeSuccess } from "./controllers/payment";
 
 const app: Application = express();
 const port = process.env.PORT || 3000;
@@ -28,11 +31,14 @@ const corsOptions: cors.CorsOptions = {
 
 app.use(cors(corsOptions));
 app.use(morgan("combined"));
+
+app.use(webhookRoutes);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(userRoutes);
 app.use(interviewRoutes);
 app.use(supportRoutes);
+app.use(paymentRoutes);
 
 connectDB().then(() => {
   const server = app.listen(port, () => {
